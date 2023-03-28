@@ -103,12 +103,20 @@ namespace ZamuPay.API.Services
 
         #region Routes
 
-        public async Task<(ZamupayRoutesDTO?, ErrorDetailDTO)> GetZamupayRoutesAsync(int expirationTime, CancellationToken cancellationToken = default!)
+        public async Task<ZamuApiResult<ZamupayRoutesDTO>> GetZamupayRoutesAsync(int expirationTime, CancellationToken cancellationToken = default!)
         {
+            var result = new ZamuApiResult<ZamupayRoutesDTO>();
+
+            var errors = new List<ErrorDetailDTO>();
+
             var auth = await this.GetZamupayIdentityServerAuthTokenAsync(cancellationToken);
 
             if (auth.Item2 != null)
-                return (null, auth.Item2);
+            {
+                errors.Add(auth.Item2);
+
+                return result.Failed(errors);
+            }
 
             var requestUrl = $"{_baseUrlConfiguration.Value.ApiBase}v1/transaction-routes/assigned-routes";
 
@@ -118,7 +126,7 @@ namespace ZamuPay.API.Services
 
                 if (redisPayload != null)
                 {
-                    return (Encoding.UTF8.GetString(redisPayload).FromJson<ZamupayRoutesDTO>(), null);
+                    return result.Success(Encoding.UTF8.GetString(redisPayload).FromJson<ZamupayRoutesDTO>());
                 }
 
                 // Create a request message with the POST method and the Uri
@@ -132,6 +140,7 @@ namespace ZamuPay.API.Services
                 // Read the response content as a string
                 var output = await response.Content.ReadAsStringAsync();
 
+
                 // Check if the response is successful
                 if (response.IsSuccessStatusCode)
                 {
@@ -144,60 +153,78 @@ namespace ZamuPay.API.Services
 
                     await _distributedCache.SetAsync("ZamupayRoutes", Encoding.UTF8.GetBytes(output), options, cancellationToken);
 
-                    return (zamupayRouteCollection, null);
+                    
+                    return result.Success(zamupayRouteCollection);
                 }
                 else
                 {
+
                     if (!string.IsNullOrWhiteSpace(output))
                     {
                         var error = output.FromJson<ErrorDetailDTO>();
 
-                        return (null, error);
+                        errors.Add(error);
+
+                        return result.Failed(errors);
                     }
 
-                    return (null, new ErrorDetailDTO { Title = $"Reason phrase: {response.ReasonPhrase}", Status = (int)response.StatusCode });
+                    errors.Add(new ErrorDetailDTO { Title = $"Reason phrase: {response.ReasonPhrase}", Status = (int)response.StatusCode });
+
+                    return result.Failed(errors);
                 }
             }
             catch (Exception ex)
             {
-                return (null, new ErrorDetailDTO { Status = -1, Title = $"{requestUrl}>ErrorMessage {ex.Message}" });
+                errors.Add(new ErrorDetailDTO { Status = -1, Title = $"{requestUrl}>ErrorMessage {ex.Message}" });
+
+                return result.Failed(errors);
             }
         }
 
-        public async Task<(RouteDTO?, ErrorDetailDTO)> GetZamupayRouteAsync(Guid id, int expirationTime, CancellationToken cancellationToken = default!)
+        public async Task<ZamuApiResult<RouteDTO>> GetZamupayRouteAsync(Guid id, int expirationTime, CancellationToken cancellationToken = default!)
         {
-            var zamupayRoutes = await this.GetZamupayRoutesAsync(expirationTime, cancellationToken);
+            var result = new ZamuApiResult<RouteDTO>();
 
-            if (zamupayRoutes.Item2 != null)
+            var zamupayRoutes = await GetZamupayRoutesAsync(expirationTime, cancellationToken);
+
+            if (!zamupayRoutes.Succeeded)
             {
-                return (null, zamupayRoutes.Item2);
+                return result.Failed(zamupayRoutes.Errors);
             }
 
-            return (zamupayRoutes.Item1?.Routes.ToList().FirstOrDefault(r => r.Id == id.ToString()), null);
+            var routes = zamupayRoutes.Items;
+
+            return result.Success(routes!.Routes?.FirstOrDefault(r => r.Id == id.ToString()));
         }
 
-        public async Task<(IEnumerable<RouteDTO>?, ErrorDetailDTO)> GetZamupayRoutesByCategoryAsync(string category, int expirationTime, CancellationToken cancellationToken = default!)
+        public async Task<ZamuApiResult<IEnumerable<RouteDTO>>> GetZamupayRoutesByCategoryAsync(string category, int expirationTime, CancellationToken cancellationToken = default!)
         {
-            var zamupayRoutes = await this.GetZamupayRoutesAsync(expirationTime, cancellationToken);
+            var result = new ZamuApiResult<IEnumerable<RouteDTO>>();
 
-            if (zamupayRoutes.Item2 != null)
+            var zamupayRoutes = await GetZamupayRoutesAsync(expirationTime, cancellationToken);
+
+            if (!zamupayRoutes.Succeeded)
             {
-                return (null, zamupayRoutes.Item2);
+                return result.Failed(zamupayRoutes.Errors);
             }
 
-            return (zamupayRoutes.Item1?.Routes.ToList().Where(r => r.Category == category).ToList(), null);
+            var routes = zamupayRoutes.Items;
+
+            return result.Success(routes!.Routes.Where(route => route.Category == category));
         }
 
-        public async Task<(IEnumerable<ChannelTypeDTO>?, ErrorDetailDTO)> GetZamupayRouteChannelTypesAsync(Guid id, int expirationTime, CancellationToken cancellationToken = default!)
+        public async Task<ZamuApiResult<IEnumerable<ChannelTypeDTO>>> GetZamupayRouteChannelTypesAsync(Guid id, int expirationTime, CancellationToken cancellationToken = default!)
         {
-            var zamupayRoute = await this.GetZamupayRouteAsync(id, expirationTime, cancellationToken);
+            var result = new ZamuApiResult<IEnumerable<ChannelTypeDTO>>();
 
-            if (zamupayRoute.Item2 != null)
+            var zamupayRoute = await GetZamupayRouteAsync(id, expirationTime, cancellationToken);
+
+            if (!zamupayRoute.Succeeded)
             {
-                return (null, zamupayRoute.Item2);
+                return result.Failed(zamupayRoute.Errors);
             }
 
-            return (zamupayRoute.Item1?.ChannelTypes, null);
+            return result.Success(zamupayRoute.Items!.ChannelTypes);
         }
 
         #endregion

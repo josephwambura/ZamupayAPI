@@ -62,29 +62,29 @@ static async Task TestZamupayAPIAsync(IServiceProvider services)
 
     var zamupayRoutes = await _zamupayService.GetZamupayRoutesAsync(10);
 
-    if (zamupayRoutes.Item2 != null)
+    if (!zamupayRoutes.Succeeded)
     {
-        Console.WriteLine(zamupayRoutes.Item2.ToString());
+        Console.WriteLine(zamupayRoutes!.Errors!.FirstOrDefault()!.Status);
     }
     else
     {
-        if (zamupayRoutes.Item1 != null)
+        if (zamupayRoutes.Succeeded)
         {
-            routes = zamupayRoutes.Item1.Routes.ToArray();
+            routes = zamupayRoutes.Items!.Routes.ToArray();
 
             Console.WriteLine(routes?.FirstOrDefault()?.RouteIntergration);
 
-            var zamupayRouteChannelTypes = await _zamupayService.GetZamupayRouteChannelTypesAsync(Guid.Parse(zamupayRoutes.Item1.Routes[0].Id), 10);
+            var zamupayRouteChannelTypes = await _zamupayService.GetZamupayRouteChannelTypesAsync(Guid.Parse(routes![0].Id), 10);
 
-            if (zamupayRouteChannelTypes.Item2 != null)
+            if (!zamupayRouteChannelTypes.Succeeded)
             {
-                Console.WriteLine(zamupayRouteChannelTypes.Item2.ToString());
+                Console.WriteLine(zamupayRouteChannelTypes!.Errors!.FirstOrDefault()!.Status);
             }
             else
             {
-                if (zamupayRouteChannelTypes.Item1 != null)
+                if (zamupayRouteChannelTypes.Succeeded)
                 {
-                    channelTypes = zamupayRouteChannelTypes.Item1.ToArray();
+                    channelTypes = zamupayRouteChannelTypes.Items?.ToArray();
 
                     Console.WriteLine(channelTypes?.FirstOrDefault()?.ChannelDescription);
                 }
@@ -92,19 +92,19 @@ static async Task TestZamupayAPIAsync(IServiceProvider services)
 
             var categories = new List<string>();
 
-            foreach (var item in zamupayRoutes.Item1.Routes)
+            foreach (var item in zamupayRoutes.Items!.Routes)
             {
                 var zamupayRoute = await _zamupayService.GetZamupayRouteAsync(Guid.Parse(item.Id), 10);
 
-                if (zamupayRoute.Item2 != null)
+                if (!zamupayRoute.Succeeded)
                 {
-                    Console.WriteLine(zamupayRoute.Item2.ToString());
+                    Console.WriteLine(zamupayRoute!.Errors!.FirstOrDefault()!.Status);
                 }
                 else
                 {
-                    if (zamupayRoute.Item1 != null)
+                    if (zamupayRoute.Succeeded)
                     {
-                        Console.WriteLine(zamupayRoute.Item1.CategoryDescription);
+                        Console.WriteLine(zamupayRoute.Items?.CategoryDescription);
                     }
                 }
 
@@ -115,15 +115,15 @@ static async Task TestZamupayAPIAsync(IServiceProvider services)
             {
                 var zamupayRouteByCategories = await _zamupayService.GetZamupayRoutesByCategoryAsync(categories[0], 10);
 
-                if (zamupayRouteByCategories.Item2 != null)
+                if (!zamupayRouteByCategories.Succeeded)
                 {
-                    Console.WriteLine(zamupayRouteByCategories.Item2.ToString());
+                    Console.WriteLine(zamupayRouteByCategories!.Errors!.FirstOrDefault()!.Status);
                 }
                 else
                 {
-                    if (zamupayRouteByCategories.Item1 != null)
+                    if (zamupayRouteByCategories.Succeeded)
                     {
-                        Console.WriteLine(zamupayRouteByCategories.Item1?.FirstOrDefault()?.RouteIntergration);
+                        Console.WriteLine(zamupayRouteByCategories.Items?.FirstOrDefault()?.RouteIntergration);
                     }
                 }
             }
