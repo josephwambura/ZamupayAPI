@@ -39,8 +39,6 @@ await TestZamupayAPIAsync(host.Services);
 
 await host.RunAsync();
 
-//Console.WriteLine("Hello, World!");
-
 static async Task TestZamupayAPIAsync(IServiceProvider services)
 {
     RouteDTO[]? routes;
@@ -54,7 +52,7 @@ static async Task TestZamupayAPIAsync(IServiceProvider services)
 
     var _zamupayService = provider.GetRequiredService<IZamupayService>();
 
-    var auth = await _zamupayService.GetZamupayIdentityServerAuthTokenAsync(CancellationToken.None);
+    var auth = await _zamupayService.GetZamupayIdentityServerAuthTokenAsync();
 
     if (!string.IsNullOrWhiteSpace(auth.Item1?.AccessToken))
     {
@@ -64,7 +62,7 @@ static async Task TestZamupayAPIAsync(IServiceProvider services)
         Console.WriteLine(auth.Item1.AccessToken);
     }
 
-    var zamupayRoutes = await _zamupayService.GetZamupayRoutesAsync(10, CancellationToken.None);
+    var zamupayRoutes = await _zamupayService.GetZamupayRoutesAsync(10);
 
     if (zamupayRoutes.Item2 != null)
     {
@@ -76,9 +74,9 @@ static async Task TestZamupayAPIAsync(IServiceProvider services)
         {
             routes = zamupayRoutes.Item1.Routes.ToArray();
 
-            Console.WriteLine(zamupayRoutes.Item1.ToString());
+            Console.WriteLine(routes?.FirstOrDefault()?.RouteIntergration);
 
-            var zamupayRouteChannelTypes = await _zamupayService.GetZamupayRouteChannelTypesAsync(Guid.Parse(zamupayRoutes.Item1.Routes[0].Id), 10, CancellationToken.None);
+            var zamupayRouteChannelTypes = await _zamupayService.GetZamupayRouteChannelTypesAsync(Guid.Parse(zamupayRoutes.Item1.Routes[0].Id), 10);
 
             if (zamupayRouteChannelTypes.Item2 != null)
             {
@@ -90,7 +88,7 @@ static async Task TestZamupayAPIAsync(IServiceProvider services)
                 {
                     channelTypes = zamupayRouteChannelTypes.Item1.ToArray();
 
-                    Console.WriteLine(zamupayRouteChannelTypes.Item1.ToString());
+                    Console.WriteLine(channelTypes?.FirstOrDefault()?.ChannelDescription);
                 }
             }
 
@@ -98,7 +96,7 @@ static async Task TestZamupayAPIAsync(IServiceProvider services)
 
             foreach (var item in zamupayRoutes.Item1.Routes)
             {
-                var zamupayRoute = await _zamupayService.GetZamupayRouteAsync(Guid.Parse(item.Id), 10, CancellationToken.None);
+                var zamupayRoute = await _zamupayService.GetZamupayRouteAsync(Guid.Parse(item.Id), 10);
 
                 if (zamupayRoute.Item2 != null)
                 {
@@ -108,7 +106,7 @@ static async Task TestZamupayAPIAsync(IServiceProvider services)
                 {
                     if (zamupayRoute.Item1 != null)
                     {
-                        Console.WriteLine(zamupayRoute.Item1.ToString());
+                        Console.WriteLine(zamupayRoute.Item1.CategoryDescription);
                     }
                 }
 
@@ -117,7 +115,7 @@ static async Task TestZamupayAPIAsync(IServiceProvider services)
 
             if (categories.Count > 0)
             {
-                var zamupayRouteByCategories = await _zamupayService.GetZamupayRoutesByCategoryAsync(categories[0], 10, CancellationToken.None);
+                var zamupayRouteByCategories = await _zamupayService.GetZamupayRoutesByCategoryAsync(categories[0], 10);
 
                 if (zamupayRouteByCategories.Item2 != null)
                 {
@@ -127,7 +125,7 @@ static async Task TestZamupayAPIAsync(IServiceProvider services)
                 {
                     if (zamupayRouteByCategories.Item1 != null)
                     {
-                        Console.WriteLine(zamupayRouteByCategories.Item1.ToString());
+                        Console.WriteLine(zamupayRouteByCategories.Item1?.FirstOrDefault()?.RouteIntergration);
                     }
                 }
             }
@@ -136,7 +134,7 @@ static async Task TestZamupayAPIAsync(IServiceProvider services)
                 10, "Joseph Githithu", "KES", false, 5, "KPLC Prepaid Bill Payment", "https://en1ezbmu2vsd.x.pipedream.net",
                 Guid.NewGuid().ToString(), "174379", false);
 
-            var createBillPaymentResult = await _zamupayService.PostBillPaymentAsync(billPayment, CancellationToken.None);
+            var createBillPaymentResult = await _zamupayService.PostBillPaymentAsync(billPayment);
 
             if (createBillPaymentResult.Item2 != null)
             {
@@ -152,7 +150,7 @@ static async Task TestZamupayAPIAsync(IServiceProvider services)
                         IdType = PaymentIdTypeEnum.OriginatorConversationId
                     };
 
-                    var billPaymentQueryResult = await _zamupayService.GetBillPaymentAsync(transactionQueryModelDTO, CancellationToken.None);
+                    var billPaymentQueryResult = await _zamupayService.GetBillPaymentAsync(transactionQueryModelDTO);
 
                     if (billPaymentQueryResult.Item2 != null)
                     {
@@ -162,11 +160,11 @@ static async Task TestZamupayAPIAsync(IServiceProvider services)
                     {
                         if (billPaymentQueryResult.Item1 != null)
                         {
-                            Console.WriteLine(billPaymentQueryResult.Item1.ToString());
+                            Console.WriteLine(billPaymentQueryResult.Item1.SystemConversationId);
                         }
                     }
 
-                    Console.WriteLine(createBillPaymentResult.Item1.ToString());
+                    Console.WriteLine(createBillPaymentResult.Item1?.Message?.DueAmount);
                 }
             }
         }

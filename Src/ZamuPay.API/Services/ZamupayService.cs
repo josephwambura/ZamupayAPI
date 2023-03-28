@@ -2,13 +2,13 @@ using ZamuPay.API.DTOs;
 using ZamuPay.API.Extensions;
 using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Options;
-using RestSharp;
 using System.Text;
 using System.Threading;
 using System;
 using System.Threading.Tasks;
 using System.Linq;
 using System.Collections.Generic;
+using System.Net.Http;
 
 namespace ZamuPay.API.Services
 {
@@ -27,33 +27,48 @@ namespace ZamuPay.API.Services
 
         #region Identity Server
 
-        public async Task<(ZamupayIdentityServerAuthTokenDTO?, ErrorDetailDTO)> GetZamupayIdentityServerAuthTokenAsync(CancellationToken cancellationToken)
+        public async Task<(ZamupayIdentityServerAuthTokenDTO?, ErrorDetailDTO)> GetZamupayIdentityServerAuthTokenAsync(CancellationToken cancellationToken = default!)
         {
             var requestUrl = $"{_baseUrlConfiguration.Value.IdentityServerBase}connect/token";
 
             try
             {
-                var redisPayload = await _distributedCache.GetAsync("ZamupayIdentityServerAuthToken");
+                var redisPayload = await _distributedCache.GetAsync("ZamupayIdentityServerAuthToken", cancellationToken);
 
                 if (redisPayload != null)
                 {
                     return (Encoding.UTF8.GetString(redisPayload).FromJson<ZamupayIdentityServerAuthTokenDTO>(), null);
                 }
 
-                var client = new RestClient(requestUrl);
-                var request = new RestRequest(requestUrl, Method.Post);
+                // Create a dictionary of parameters
+                var parameters = new Dictionary<string, string>
+                {
+                    { "client_id", _baseUrlConfiguration.Value.ClientId },
+                    { "client_secret", _baseUrlConfiguration.Value.ClientSecret },
+                    { "grant_type", _baseUrlConfiguration.Value.GrantType },
+                    { "scope", _baseUrlConfiguration.Value.Scope }
+                };
 
-                request.AddHeader("Content-Type", "application/x-www-form-urlencoded");
-                request.AddParameter("client_id", _baseUrlConfiguration.Value.ClientId);
-                request.AddParameter("client_secret", _baseUrlConfiguration.Value.ClientSecret);
-                request.AddParameter("grant_type", _baseUrlConfiguration.Value.GrantType);
-                request.AddParameter("scope", _baseUrlConfiguration.Value.Scope);
+                // Create a content object with the parameters and the media type
+                var content = new FormUrlEncodedContent(parameters);
 
-                RestResponse response = await client.ExecuteAsync(request);
+                // Create a request message with the POST method and the Uri
+                var request = new HttpRequestMessage(HttpMethod.Post, "connect/token")
+                {
+                    // Add the content to the request
+                    Content = content
+                };
 
-                var output = response.Content;
+                // Add some custom headers to the request without validation
+                request.Headers.TryAddWithoutValidation("Content-Type", "application/x-www-form-urlencoded");
 
-                if (response.IsSuccessful && !string.IsNullOrWhiteSpace(output))
+                HttpResponseMessage response = await HttpClientExtensions.SendHttpClientRequestAsync(_baseUrlConfiguration.Value.IdentityServerBase, request, cancellationToken);
+
+                // Read the response content as a string
+                var output = await response.Content.ReadAsStringAsync();
+
+                // Check if the response is successful
+                if (response.IsSuccessStatusCode)
                 {
                     var zamupayIdentityServerAuthToken = output.FromJson<ZamupayIdentityServerAuthTokenDTO>();
 
@@ -66,22 +81,31 @@ namespace ZamuPay.API.Services
 
                     return (zamupayIdentityServerAuthToken, null);
                 }
+                else
+                {
+                    if (!string.IsNullOrWhiteSpace(output))
+                    {
+                        var error = output.FromJson<ErrorDetailDTO>();
+
+                        return (null, error);
+                    }
+
+                    return (null, new ErrorDetailDTO { Title = $"Reason phrase: {response.ReasonPhrase}", Status = (int)response.StatusCode });
+                }
             }
             catch (Exception ex)
             {
                 return (null, new ErrorDetailDTO { Status = -1, Title = $"{requestUrl}>ErrorMessage {ex.Message}" });
             }
-
-            return (null, null);
         }
 
         #endregion
 
         #region Routes
 
-        public async Task<(ZamupayRoutesDTO?, ErrorDetailDTO)> GetZamupayRoutesAsync(int expirationTime, CancellationToken cancellationToken)
+        public async Task<(ZamupayRoutesDTO?, ErrorDetailDTO)> GetZamupayRoutesAsync(int expirationTime, CancellationToken cancellationToken = default!)
         {
-            var auth = await this.GetZamupayIdentityServerAuthTokenAsync(CancellationToken.None);
+            var auth = await this.GetZamupayIdentityServerAuthTokenAsync(cancellationToken);
 
             if (auth.Item2 != null)
                 return (null, auth.Item2);
@@ -97,16 +121,19 @@ namespace ZamuPay.API.Services
                     return (Encoding.UTF8.GetString(redisPayload).FromJson<ZamupayRoutesDTO>(), null);
                 }
 
-                var client = new RestClient(requestUrl);
-                var request = new RestRequest(requestUrl, Method.Get);
+                // Create a request message with the POST method and the Uri
+                var request = new HttpRequestMessage(HttpMethod.Get, "v1/transaction-routes/assigned-routes");
 
-                request.AddHeader("Authorization", $"Bearer {auth.Item1?.AccessToken}");
+                // Add some custom headers to the request without validation
+                request.Headers.TryAddWithoutValidation("Authorization", $"Bearer {auth.Item1?.AccessToken}");
 
-                RestResponse response = await client.ExecuteAsync(request);
+                HttpResponseMessage response = await HttpClientExtensions.SendHttpClientRequestAsync(_baseUrlConfiguration.Value.ApiBase, request, cancellationToken);
 
-                var output = response.Content;
+                // Read the response content as a string
+                var output = await response.Content.ReadAsStringAsync();
 
-                if (response.IsSuccessful && !string.IsNullOrWhiteSpace(output))
+                // Check if the response is successful
+                if (response.IsSuccessStatusCode)
                 {
                     var zamupayRouteCollection = output.FromJson<ZamupayRoutesDTO>();
 
@@ -119,23 +146,25 @@ namespace ZamuPay.API.Services
 
                     return (zamupayRouteCollection, null);
                 }
-
-                if (!string.IsNullOrWhiteSpace(output))
+                else
                 {
-                    var error = output.FromJson<ErrorDetailDTO>();
+                    if (!string.IsNullOrWhiteSpace(output))
+                    {
+                        var error = output.FromJson<ErrorDetailDTO>();
 
-                    return (null, error);
+                        return (null, error);
+                    }
+
+                    return (null, new ErrorDetailDTO { Title = $"Reason phrase: {response.ReasonPhrase}", Status = (int)response.StatusCode });
                 }
             }
             catch (Exception ex)
             {
                 return (null, new ErrorDetailDTO { Status = -1, Title = $"{requestUrl}>ErrorMessage {ex.Message}" });
             }
-
-            return (null, null);
         }
 
-        public async Task<(RouteDTO?, ErrorDetailDTO)> GetZamupayRouteAsync(Guid id, int expirationTime, CancellationToken cancellationToken)
+        public async Task<(RouteDTO?, ErrorDetailDTO)> GetZamupayRouteAsync(Guid id, int expirationTime, CancellationToken cancellationToken = default!)
         {
             var zamupayRoutes = await this.GetZamupayRoutesAsync(expirationTime, cancellationToken);
 
@@ -147,7 +176,7 @@ namespace ZamuPay.API.Services
             return (zamupayRoutes.Item1?.Routes.ToList().FirstOrDefault(r => r.Id == id.ToString()), null);
         }
 
-        public async Task<(IEnumerable<RouteDTO>?, ErrorDetailDTO)> GetZamupayRoutesByCategoryAsync(string category, int expirationTime, CancellationToken cancellationToken)
+        public async Task<(IEnumerable<RouteDTO>?, ErrorDetailDTO)> GetZamupayRoutesByCategoryAsync(string category, int expirationTime, CancellationToken cancellationToken = default!)
         {
             var zamupayRoutes = await this.GetZamupayRoutesAsync(expirationTime, cancellationToken);
 
@@ -159,7 +188,7 @@ namespace ZamuPay.API.Services
             return (zamupayRoutes.Item1?.Routes.ToList().Where(r => r.Category == category).ToList(), null);
         }
 
-        public async Task<(IEnumerable<ChannelTypeDTO>?, ErrorDetailDTO)> GetZamupayRouteChannelTypesAsync(Guid id, int expirationTime, CancellationToken cancellationToken)
+        public async Task<(IEnumerable<ChannelTypeDTO>?, ErrorDetailDTO)> GetZamupayRouteChannelTypesAsync(Guid id, int expirationTime, CancellationToken cancellationToken = default!)
         {
             var zamupayRoute = await this.GetZamupayRouteAsync(id, expirationTime, cancellationToken);
 
@@ -175,9 +204,9 @@ namespace ZamuPay.API.Services
 
         #region Payment Orders
 
-        public async Task<(PaymentOrderDTO?, object)> GetPaymentOrderAsync(TransactionQueryModelDTO paymentQueryModel, CancellationToken cancellationToken)
+        public async Task<(PaymentOrderDTO?, object)> GetPaymentOrderAsync(TransactionQueryModelDTO paymentQueryModel, CancellationToken cancellationToken = default!)
         {
-            var auth = await this.GetZamupayIdentityServerAuthTokenAsync(CancellationToken.None);
+            var auth = await this.GetZamupayIdentityServerAuthTokenAsync(cancellationToken);
 
             if (auth.Item2 != null)
                 return (null, auth.Item2);
@@ -186,237 +215,54 @@ namespace ZamuPay.API.Services
 
             try
             {
-                var client = new RestClient(requestUrl);
-                var request = new RestRequest(requestUrl, Method.Get);
+                // Create a request message with the POST method and the Uri
+                var request = new HttpRequestMessage(HttpMethod.Get, $"v1/payment-order/check-status?Id={paymentQueryModel.Id}&IdType={paymentQueryModel.IdType}");
 
-                request.AddHeader("Authorization", $"Bearer {auth.Item1?.AccessToken}");
+                // Add some custom headers to the request without validation
+                request.Headers.TryAddWithoutValidation("Authorization", $"Bearer {auth.Item1?.AccessToken}");
 
-                RestResponse response = await client.ExecuteAsync(request);
+                HttpResponseMessage response = await HttpClientExtensions.SendHttpClientRequestAsync(_baseUrlConfiguration.Value.ApiBase, request, cancellationToken);
 
-                var output = response.Content;
+                // Read the response content as a string
+                var output = await response.Content.ReadAsStringAsync();
 
-                if (!string.IsNullOrWhiteSpace(output))
+                // Check if the response is successful
+                if (response.IsSuccessStatusCode)
                 {
-                    if (response.IsSuccessful)
-                    {
-                        switch (response.StatusCode)
-                        {
-                            case System.Net.HttpStatusCode.Accepted:
-                                break;
-                            case System.Net.HttpStatusCode.AlreadyReported:
-                                break;
-                            case System.Net.HttpStatusCode.Ambiguous:
-                                break;
-                            case System.Net.HttpStatusCode.BadGateway:
-                                break;
-                            case System.Net.HttpStatusCode.BadRequest:
+                    var zamupayRouteCollection = output.FromJson<PaymentOrderDTO>();
 
-                                //var zamupayPaymentOrderQueryErrors = output.FromJson<PaymentFailedWithErrorsResponseDTO>();
-
-                                //return (null, new ErrorDetailDTO
-                                //{
-                                //    Status = (int)System.Net.HttpStatusCode.BadRequest,
-                                //    Title = zamupayPaymentOrderQueryErrors.Message,
-                                //    TraceId = zamupayPaymentOrderQueryErrors.Id
-                                //});
-
-                                return (null, output.FromJson<PaymentFailedWithErrorsResponseDTO>());
-
-                            //break;
-                            case System.Net.HttpStatusCode.Conflict:
-                                break;
-                            case System.Net.HttpStatusCode.Continue:
-                                break;
-                            case System.Net.HttpStatusCode.Created:
-                                break;
-                            case System.Net.HttpStatusCode.EarlyHints:
-                                break;
-                            case System.Net.HttpStatusCode.ExpectationFailed:
-                                break;
-                            case System.Net.HttpStatusCode.FailedDependency:
-                                break;
-                            case System.Net.HttpStatusCode.Forbidden:
-
-                                //var zamupayPaymentOrderNotFound = output.FromJson<PaymentOrderNotFoundDTO>();
-
-                                //return (null, new ErrorDetailDTO
-                                //{
-                                //    Status = (int)System.Net.HttpStatusCode.NotFound,
-                                //    Title = zamupayPaymentOrderNotFound.Message,
-                                //    TraceId = zamupayPaymentOrderNotFound.Id
-                                //});
-
-                                return (null, output.FromJson<PaymentOrderNotFoundDTO>());
-
-                                //break;
-                            case System.Net.HttpStatusCode.Found:
-                                break;
-                            case System.Net.HttpStatusCode.GatewayTimeout:
-                                break;
-                            case System.Net.HttpStatusCode.Gone:
-                                break;
-                            case System.Net.HttpStatusCode.HttpVersionNotSupported:
-                                break;
-                            case System.Net.HttpStatusCode.IMUsed:
-                                break;
-                            case System.Net.HttpStatusCode.InsufficientStorage:
-                                break;
-                            case System.Net.HttpStatusCode.InternalServerError:
-                                break;
-                            case System.Net.HttpStatusCode.LengthRequired:
-                                break;
-                            case System.Net.HttpStatusCode.Locked:
-                                break;
-                            case System.Net.HttpStatusCode.LoopDetected:
-                                break;
-                            case System.Net.HttpStatusCode.MethodNotAllowed:
-                                break;
-                            case System.Net.HttpStatusCode.MisdirectedRequest:
-                                break;
-                            case System.Net.HttpStatusCode.Moved:
-                                break;
-                            //case System.Net.HttpStatusCode.MovedPermanently:
-                            //    break;
-                            //case System.Net.HttpStatusCode.MultipleChoices:
-                            //    break;
-                            case System.Net.HttpStatusCode.MultiStatus:
-                                break;
-                            case System.Net.HttpStatusCode.NetworkAuthenticationRequired:
-                                break;
-                            case System.Net.HttpStatusCode.NoContent:
-                                break;
-                            case System.Net.HttpStatusCode.NonAuthoritativeInformation:
-                                break;
-                            case System.Net.HttpStatusCode.NotAcceptable:
-                                break;
-                            case System.Net.HttpStatusCode.NotExtended:
-                                break;
-                            case System.Net.HttpStatusCode.NotFound:
-
-                                //var zamupayPaymentOrderNotFound = output.FromJson<PaymentOrderNotFoundDTO>();
-
-                                //return (null, new ErrorDetailDTO
-                                //{
-                                //    Status = (int)System.Net.HttpStatusCode.NotFound,
-                                //    Title = zamupayPaymentOrderNotFound.Message,
-                                //    TraceId = zamupayPaymentOrderNotFound.Id
-                                //});
-
-                                return (null, output.FromJson<PaymentOrderNotFoundDTO>());
-
-                                //break;
-                            case System.Net.HttpStatusCode.NotImplemented:
-                                break;
-                            case System.Net.HttpStatusCode.NotModified:
-                                break;
-                            case System.Net.HttpStatusCode.OK:
-
-                                return (output.FromJson<PaymentOrderDTO>(), null);
-
-                                //break;
-                            case System.Net.HttpStatusCode.PartialContent:
-                                break;
-                            case System.Net.HttpStatusCode.PaymentRequired:
-                                break;
-                            case System.Net.HttpStatusCode.PermanentRedirect:
-                                break;
-                            case System.Net.HttpStatusCode.PreconditionFailed:
-                                break;
-                            case System.Net.HttpStatusCode.PreconditionRequired:
-                                break;
-                            case System.Net.HttpStatusCode.Processing:
-                                break;
-                            case System.Net.HttpStatusCode.ProxyAuthenticationRequired:
-                                break;
-                            //case System.Net.HttpStatusCode.Redirect:
-                            //    break;
-                            case System.Net.HttpStatusCode.RedirectKeepVerb:
-                                break;
-                            case System.Net.HttpStatusCode.RedirectMethod:
-                                break;
-                            case System.Net.HttpStatusCode.RequestedRangeNotSatisfiable:
-                                break;
-                            case System.Net.HttpStatusCode.RequestEntityTooLarge:
-                                break;
-                            case System.Net.HttpStatusCode.RequestHeaderFieldsTooLarge:
-                                break;
-                            case System.Net.HttpStatusCode.RequestTimeout:
-                                break;
-                            case System.Net.HttpStatusCode.RequestUriTooLong:
-                                break;
-                            case System.Net.HttpStatusCode.ResetContent:
-                                break;
-                            //case System.Net.HttpStatusCode.SeeOther:
-                            //    break;
-                            case System.Net.HttpStatusCode.ServiceUnavailable:
-                                break;
-                            case System.Net.HttpStatusCode.SwitchingProtocols:
-                                break;
-                            //case System.Net.HttpStatusCode.TemporaryRedirect:
-                            //    break;
-                            case System.Net.HttpStatusCode.TooManyRequests:
-                                break;
-                            case System.Net.HttpStatusCode.Unauthorized:
-
-                                //var zamupayPaymentOrderNotFound = output.FromJson<PaymentOrderNotFoundDTO>();
-
-                                //return (null, new ErrorDetailDTO
-                                //{
-                                //    Status = (int)System.Net.HttpStatusCode.NotFound,
-                                //    Title = zamupayPaymentOrderNotFound.Message,
-                                //    TraceId = zamupayPaymentOrderNotFound.Id
-                                //});
-
-                                return (null, output.FromJson<PaymentOrderNotFoundDTO>());
-
-                                //break;
-                            case System.Net.HttpStatusCode.UnavailableForLegalReasons:
-                                break;
-                            case System.Net.HttpStatusCode.UnprocessableEntity:
-                                break;
-                            case System.Net.HttpStatusCode.UnsupportedMediaType:
-                                break;
-                            case System.Net.HttpStatusCode.Unused:
-                                break;
-                            case System.Net.HttpStatusCode.UpgradeRequired:
-                                break;
-                            case System.Net.HttpStatusCode.UseProxy:
-                                break;
-                            case System.Net.HttpStatusCode.VariantAlsoNegotiates:
-                                break;
-                            default:
-                                break;
-                        }
-                    }
+                    return (zamupayRouteCollection, null);
                 }
-
-                if (!string.IsNullOrWhiteSpace(output))
+                else
                 {
-                    var error = output.FromJson<ErrorDetailDTO>();
+                    if (!string.IsNullOrWhiteSpace(output))
+                    {
+                        var error = output.FromJson<ErrorDetailDTO>();
 
-                    return (null, error);
+                        return (null, error);
+                    }
+
+                    return (null, new ErrorDetailDTO { Title = $"Reason phrase: {response.ReasonPhrase}", Status = (int)response.StatusCode });
                 }
             }
             catch (Exception ex)
             {
                 return (null, new ErrorDetailDTO { Status = -1, Title = $"{requestUrl}>ErrorMessage {ex.Message}" });
             }
-
-            return (null, null);
         }
 
         #endregion
 
         #region Airtime Purchases
 
-        public Task<(AirtimePurchaseRequestDTO?, object)> PostAirtimePurchaseRequestAsync(AirtimePurchaseRequestDTO paymentQueryModel, CancellationToken cancellationToken)
+        public Task<(AirtimePurchaseRequestDTO?, object)> PostAirtimePurchaseRequestAsync(AirtimePurchaseRequestDTO paymentQueryModel, CancellationToken cancellationToken = default!)
         {
             throw new NotImplementedException();
         }
 
-        public async Task<(PaymentOrderDTO?, object)> GetAirtimePurchaseAsync(TransactionQueryModelDTO paymentQueryModel, CancellationToken cancellationToken)
+        public async Task<(PaymentOrderDTO?, object)> GetAirtimePurchaseAsync(TransactionQueryModelDTO paymentQueryModel, CancellationToken cancellationToken = default!)
         {
-            var auth = await this.GetZamupayIdentityServerAuthTokenAsync(CancellationToken.None);
+            var auth = await this.GetZamupayIdentityServerAuthTokenAsync(cancellationToken);
 
             if (auth.Item2 != null)
                 return (null, auth.Item2);
@@ -425,232 +271,49 @@ namespace ZamuPay.API.Services
 
             try
             {
-                var client = new RestClient(requestUrl);
-                var request = new RestRequest(requestUrl, Method.Get);
+                // Create a request message with the POST method and the Uri
+                var request = new HttpRequestMessage(HttpMethod.Get, $"v1/payment-order/check-status?Id={paymentQueryModel.Id}&IdType={paymentQueryModel.IdType}");
 
-                request.AddHeader("Authorization", $"Bearer {auth.Item1?.AccessToken}");
+                // Add some custom headers to the request without validation
+                request.Headers.TryAddWithoutValidation("Authorization", $"Bearer {auth.Item1?.AccessToken}");
 
-                RestResponse response = await client.ExecuteAsync(request);
+                HttpResponseMessage response = await HttpClientExtensions.SendHttpClientRequestAsync(_baseUrlConfiguration.Value.ApiBase, request, cancellationToken);
 
-                var output = response.Content;
+                // Read the response content as a string
+                var output = await response.Content.ReadAsStringAsync();
 
-                if (!string.IsNullOrWhiteSpace(output))
+                // Check if the response is successful
+                if (response.IsSuccessStatusCode)
                 {
-                    if (response.IsSuccessful)
-                    {
-                        switch (response.StatusCode)
-                        {
-                            case System.Net.HttpStatusCode.Accepted:
-                                break;
-                            case System.Net.HttpStatusCode.AlreadyReported:
-                                break;
-                            case System.Net.HttpStatusCode.Ambiguous:
-                                break;
-                            case System.Net.HttpStatusCode.BadGateway:
-                                break;
-                            case System.Net.HttpStatusCode.BadRequest:
+                    var zamupayRouteCollection = output.FromJson<PaymentOrderDTO>();
 
-                                //var zamupayPaymentOrderQueryErrors = output.FromJson<PaymentFailedWithErrorsResponseDTO>();
-
-                                //return (null, new ErrorDetailDTO
-                                //{
-                                //    Status = (int)System.Net.HttpStatusCode.BadRequest,
-                                //    Title = zamupayPaymentOrderQueryErrors.Message,
-                                //    TraceId = zamupayPaymentOrderQueryErrors.Id
-                                //});
-
-                                return (null, output.FromJson<PaymentFailedWithErrorsResponseDTO>());
-
-                            //break;
-                            case System.Net.HttpStatusCode.Conflict:
-                                break;
-                            case System.Net.HttpStatusCode.Continue:
-                                break;
-                            case System.Net.HttpStatusCode.Created:
-                                break;
-                            case System.Net.HttpStatusCode.EarlyHints:
-                                break;
-                            case System.Net.HttpStatusCode.ExpectationFailed:
-                                break;
-                            case System.Net.HttpStatusCode.FailedDependency:
-                                break;
-                            case System.Net.HttpStatusCode.Forbidden:
-
-                                //var zamupayPaymentOrderNotFound = output.FromJson<PaymentOrderNotFoundDTO>();
-
-                                //return (null, new ErrorDetailDTO
-                                //{
-                                //    Status = (int)System.Net.HttpStatusCode.NotFound,
-                                //    Title = zamupayPaymentOrderNotFound.Message,
-                                //    TraceId = zamupayPaymentOrderNotFound.Id
-                                //});
-
-                                return (null, output.FromJson<PaymentOrderNotFoundDTO>());
-
-                            //break;
-                            case System.Net.HttpStatusCode.Found:
-                                break;
-                            case System.Net.HttpStatusCode.GatewayTimeout:
-                                break;
-                            case System.Net.HttpStatusCode.Gone:
-                                break;
-                            case System.Net.HttpStatusCode.HttpVersionNotSupported:
-                                break;
-                            case System.Net.HttpStatusCode.IMUsed:
-                                break;
-                            case System.Net.HttpStatusCode.InsufficientStorage:
-                                break;
-                            case System.Net.HttpStatusCode.InternalServerError:
-                                break;
-                            case System.Net.HttpStatusCode.LengthRequired:
-                                break;
-                            case System.Net.HttpStatusCode.Locked:
-                                break;
-                            case System.Net.HttpStatusCode.LoopDetected:
-                                break;
-                            case System.Net.HttpStatusCode.MethodNotAllowed:
-                                break;
-                            case System.Net.HttpStatusCode.MisdirectedRequest:
-                                break;
-                            case System.Net.HttpStatusCode.Moved:
-                                break;
-                            //case System.Net.HttpStatusCode.MovedPermanently:
-                            //    break;
-                            //case System.Net.HttpStatusCode.MultipleChoices:
-                            //    break;
-                            case System.Net.HttpStatusCode.MultiStatus:
-                                break;
-                            case System.Net.HttpStatusCode.NetworkAuthenticationRequired:
-                                break;
-                            case System.Net.HttpStatusCode.NoContent:
-                                break;
-                            case System.Net.HttpStatusCode.NonAuthoritativeInformation:
-                                break;
-                            case System.Net.HttpStatusCode.NotAcceptable:
-                                break;
-                            case System.Net.HttpStatusCode.NotExtended:
-                                break;
-                            case System.Net.HttpStatusCode.NotFound:
-
-                                //var zamupayPaymentOrderNotFound = output.FromJson<PaymentOrderNotFoundDTO>();
-
-                                //return (null, new ErrorDetailDTO
-                                //{
-                                //    Status = (int)System.Net.HttpStatusCode.NotFound,
-                                //    Title = zamupayPaymentOrderNotFound.Message,
-                                //    TraceId = zamupayPaymentOrderNotFound.Id
-                                //});
-
-                                return (null, output.FromJson<PaymentOrderNotFoundDTO>());
-
-                            //break;
-                            case System.Net.HttpStatusCode.NotImplemented:
-                                break;
-                            case System.Net.HttpStatusCode.NotModified:
-                                break;
-                            case System.Net.HttpStatusCode.OK:
-
-                                return (output.FromJson<PaymentOrderDTO>(), null);
-
-                            //break;
-                            case System.Net.HttpStatusCode.PartialContent:
-                                break;
-                            case System.Net.HttpStatusCode.PaymentRequired:
-                                break;
-                            case System.Net.HttpStatusCode.PermanentRedirect:
-                                break;
-                            case System.Net.HttpStatusCode.PreconditionFailed:
-                                break;
-                            case System.Net.HttpStatusCode.PreconditionRequired:
-                                break;
-                            case System.Net.HttpStatusCode.Processing:
-                                break;
-                            case System.Net.HttpStatusCode.ProxyAuthenticationRequired:
-                                break;
-                            //case System.Net.HttpStatusCode.Redirect:
-                            //    break;
-                            case System.Net.HttpStatusCode.RedirectKeepVerb:
-                                break;
-                            case System.Net.HttpStatusCode.RedirectMethod:
-                                break;
-                            case System.Net.HttpStatusCode.RequestedRangeNotSatisfiable:
-                                break;
-                            case System.Net.HttpStatusCode.RequestEntityTooLarge:
-                                break;
-                            case System.Net.HttpStatusCode.RequestHeaderFieldsTooLarge:
-                                break;
-                            case System.Net.HttpStatusCode.RequestTimeout:
-                                break;
-                            case System.Net.HttpStatusCode.RequestUriTooLong:
-                                break;
-                            case System.Net.HttpStatusCode.ResetContent:
-                                break;
-                            //case System.Net.HttpStatusCode.SeeOther:
-                            //    break;
-                            case System.Net.HttpStatusCode.ServiceUnavailable:
-                                break;
-                            case System.Net.HttpStatusCode.SwitchingProtocols:
-                                break;
-                            //case System.Net.HttpStatusCode.TemporaryRedirect:
-                            //    break;
-                            case System.Net.HttpStatusCode.TooManyRequests:
-                                break;
-                            case System.Net.HttpStatusCode.Unauthorized:
-
-                                //var zamupayPaymentOrderNotFound = output.FromJson<PaymentOrderNotFoundDTO>();
-
-                                //return (null, new ErrorDetailDTO
-                                //{
-                                //    Status = (int)System.Net.HttpStatusCode.NotFound,
-                                //    Title = zamupayPaymentOrderNotFound.Message,
-                                //    TraceId = zamupayPaymentOrderNotFound.Id
-                                //});
-
-                                return (null, output.FromJson<PaymentOrderNotFoundDTO>());
-
-                            //break;
-                            case System.Net.HttpStatusCode.UnavailableForLegalReasons:
-                                break;
-                            case System.Net.HttpStatusCode.UnprocessableEntity:
-                                break;
-                            case System.Net.HttpStatusCode.UnsupportedMediaType:
-                                break;
-                            case System.Net.HttpStatusCode.Unused:
-                                break;
-                            case System.Net.HttpStatusCode.UpgradeRequired:
-                                break;
-                            case System.Net.HttpStatusCode.UseProxy:
-                                break;
-                            case System.Net.HttpStatusCode.VariantAlsoNegotiates:
-                                break;
-                            default:
-                                break;
-                        }
-                    }
+                    return (zamupayRouteCollection, null);
                 }
-
-                if (!string.IsNullOrWhiteSpace(output))
+                else
                 {
-                    var error = output.FromJson<ErrorDetailDTO>();
+                    if (!string.IsNullOrWhiteSpace(output))
+                    {
+                        var error = output.FromJson<ErrorDetailDTO>();
 
-                    return (null, error);
+                        return (null, error);
+                    }
+
+                    return (null, new ErrorDetailDTO { Title = $"Reason phrase: {response.ReasonPhrase}", Status = (int)response.StatusCode });
                 }
             }
             catch (Exception ex)
             {
                 return (null, new ErrorDetailDTO { Status = -1, Title = $"{requestUrl}>ErrorMessage {ex.Message}" });
             }
-
-            return (null, null);
         }
 
         #endregion
 
         #region Bill Payments
 
-        public async Task<(BillPaymentSuccessResponseDTO?, object)> PostBillPaymentAsync(BillPaymentDTO billPaymentDTO, CancellationToken cancellationToken)
+        public async Task<(BillPaymentSuccessResponseDTO?, object)> PostBillPaymentAsync(BillPaymentDTO billPaymentDTO, CancellationToken cancellationToken = default!)
         {
-            var auth = await this.GetZamupayIdentityServerAuthTokenAsync(CancellationToken.None);
+            var auth = await this.GetZamupayIdentityServerAuthTokenAsync(cancellationToken);
 
             if (auth.Item2 != null)
                 return (null, auth.Item2);
@@ -659,36 +322,52 @@ namespace ZamuPay.API.Services
 
             try
             {
-                var client = new RestClient(requestUrl);
-                var request = new RestRequest(requestUrl, Method.Post);
-
-                request.AddHeader("Content-Type", "application/json");
-                request.AddParameter("application/json", billPaymentDTO.ToJson(),  ParameterType.RequestBody);
-                request.AddHeader("Authorization", $"Bearer {auth.Item1?.AccessToken}");
-                request.AddHeader("Accept", "text/plain");
-
-                RestResponse response = await client.ExecuteAsync(request);
-
-                var output = response.Content;
-
-                if (response.IsSuccessful && !string.IsNullOrWhiteSpace(output))
+                
+                // Create a request message with the POST method and the Uri
+                var request = new HttpRequestMessage(HttpMethod.Post, "v1/bill-payments")
                 {
-                    var zamupayIdentityServerAuthToken = output.FromJson<BillPaymentSuccessResponseDTO>();
+                    // Add the content to the request
+                    Content = new StringContent(billPaymentDTO.ToJson())
+                };
 
-                    return (zamupayIdentityServerAuthToken, null);
+                // Add some custom headers to the request without validation
+                request.Headers.TryAddWithoutValidation("Content-Type", "application/json");
+                request.Headers.TryAddWithoutValidation("Authorization", $"Bearer {auth.Item1?.AccessToken}");
+                request.Headers.TryAddWithoutValidation("Accept", "text/plain");
+
+                HttpResponseMessage response = await HttpClientExtensions.SendHttpClientRequestAsync(_baseUrlConfiguration.Value.ApiBase, request, cancellationToken);
+
+                // Read the response content as a string
+                var output = await response.Content.ReadAsStringAsync();
+
+                // Check if the response is successful
+                if (response.IsSuccessStatusCode)
+                {
+                    var zamupayRouteCollection = output.FromJson<BillPaymentSuccessResponseDTO>();
+
+                    return (zamupayRouteCollection, null);
+                }
+                else
+                {
+                    if (!string.IsNullOrWhiteSpace(output))
+                    {
+                        var error = output.FromJson<ErrorDetailDTO>();
+
+                        return (null, error);
+                    }
+
+                    return (null, new ErrorDetailDTO { Title = $"Reason phrase: {response.ReasonPhrase}", Status = (int)response.StatusCode });
                 }
             }
             catch (Exception ex)
             {
                 return (null, new ErrorDetailDTO { Status = -1, Title = $"{requestUrl}>ErrorMessage {ex.Message}" });
             }
-
-            return (null, null);
         }
 
-        public async Task<(BillPaymentResultDTO?, object)> GetBillPaymentAsync(TransactionQueryModelDTO paymentQueryModel, CancellationToken cancellationToken)
+        public async Task<(BillPaymentResultDTO?, object)> GetBillPaymentAsync(TransactionQueryModelDTO paymentQueryModel, CancellationToken cancellationToken = default!)
         {
-            var auth = await this.GetZamupayIdentityServerAuthTokenAsync(CancellationToken.None);
+            var auth = await this.GetZamupayIdentityServerAuthTokenAsync(cancellationToken);
 
             if (auth.Item2 != null)
                 return (null, auth.Item2);
@@ -697,223 +376,40 @@ namespace ZamuPay.API.Services
 
             try
             {
-                var client = new RestClient(requestUrl);
-                var request = new RestRequest(requestUrl, Method.Get);
+                // Create a request message with the POST method and the Uri
+                var request = new HttpRequestMessage(HttpMethod.Get, $"v1/bill-payments?{paymentQueryModel.IdType}={paymentQueryModel.Id}");
 
-                request.AddHeader("Authorization", $"Bearer {auth.Item1?.AccessToken}");
+                // Add some custom headers to the request without validation
+                request.Headers.TryAddWithoutValidation("Authorization", $"Bearer {auth.Item1?.AccessToken}");
 
-                RestResponse response = await client.ExecuteAsync(request);
+                HttpResponseMessage response = await HttpClientExtensions.SendHttpClientRequestAsync(_baseUrlConfiguration.Value.ApiBase, request, cancellationToken);
 
-                var output = response.Content;
+                // Read the response content as a string
+                var output = await response.Content.ReadAsStringAsync();
 
-                if (!string.IsNullOrWhiteSpace(output))
+                // Check if the response is successful
+                if (response.IsSuccessStatusCode)
                 {
-                    if (response.IsSuccessful)
-                    {
-                        switch (response.StatusCode)
-                        {
-                            case System.Net.HttpStatusCode.Accepted:
-                                break;
-                            case System.Net.HttpStatusCode.AlreadyReported:
-                                break;
-                            case System.Net.HttpStatusCode.Ambiguous:
-                                break;
-                            case System.Net.HttpStatusCode.BadGateway:
-                                break;
-                            case System.Net.HttpStatusCode.BadRequest:
+                    var zamupayRouteCollection = output.FromJson<BillPaymentResultDTO>();
 
-                                //var zamupayPaymentOrderQueryErrors = output.FromJson<PaymentFailedWithErrorsResponseDTO>();
-
-                                //return (null, new ErrorDetailDTO
-                                //{
-                                //    Status = (int)System.Net.HttpStatusCode.BadRequest,
-                                //    Title = zamupayPaymentOrderQueryErrors.Message,
-                                //    TraceId = zamupayPaymentOrderQueryErrors.Id
-                                //});
-
-                                return (null, output.FromJson<PaymentFailedWithErrorsResponseDTO>());
-
-                            //break;
-                            case System.Net.HttpStatusCode.Conflict:
-                                break;
-                            case System.Net.HttpStatusCode.Continue:
-                                break;
-                            case System.Net.HttpStatusCode.Created:
-                                break;
-                            case System.Net.HttpStatusCode.EarlyHints:
-                                break;
-                            case System.Net.HttpStatusCode.ExpectationFailed:
-                                break;
-                            case System.Net.HttpStatusCode.FailedDependency:
-                                break;
-                            case System.Net.HttpStatusCode.Forbidden:
-
-                                //var zamupayPaymentOrderNotFound = output.FromJson<PaymentOrderNotFoundDTO>();
-
-                                //return (null, new ErrorDetailDTO
-                                //{
-                                //    Status = (int)System.Net.HttpStatusCode.NotFound,
-                                //    Title = zamupayPaymentOrderNotFound.Message,
-                                //    TraceId = zamupayPaymentOrderNotFound.Id
-                                //});
-
-                                return (null, output.FromJson<PaymentOrderNotFoundDTO>());
-
-                            //break;
-                            case System.Net.HttpStatusCode.Found:
-                                break;
-                            case System.Net.HttpStatusCode.GatewayTimeout:
-                                break;
-                            case System.Net.HttpStatusCode.Gone:
-                                break;
-                            case System.Net.HttpStatusCode.HttpVersionNotSupported:
-                                break;
-                            case System.Net.HttpStatusCode.IMUsed:
-                                break;
-                            case System.Net.HttpStatusCode.InsufficientStorage:
-                                break;
-                            case System.Net.HttpStatusCode.InternalServerError:
-                                break;
-                            case System.Net.HttpStatusCode.LengthRequired:
-                                break;
-                            case System.Net.HttpStatusCode.Locked:
-                                break;
-                            case System.Net.HttpStatusCode.LoopDetected:
-                                break;
-                            case System.Net.HttpStatusCode.MethodNotAllowed:
-                                break;
-                            case System.Net.HttpStatusCode.MisdirectedRequest:
-                                break;
-                            case System.Net.HttpStatusCode.Moved:
-                                break;
-                            //case System.Net.HttpStatusCode.MovedPermanently:
-                            //    break;
-                            //case System.Net.HttpStatusCode.MultipleChoices:
-                            //    break;
-                            case System.Net.HttpStatusCode.MultiStatus:
-                                break;
-                            case System.Net.HttpStatusCode.NetworkAuthenticationRequired:
-                                break;
-                            case System.Net.HttpStatusCode.NoContent:
-                                break;
-                            case System.Net.HttpStatusCode.NonAuthoritativeInformation:
-                                break;
-                            case System.Net.HttpStatusCode.NotAcceptable:
-                                break;
-                            case System.Net.HttpStatusCode.NotExtended:
-                                break;
-                            case System.Net.HttpStatusCode.NotFound:
-
-                                //var zamupayPaymentOrderNotFound = output.FromJson<PaymentOrderNotFoundDTO>();
-
-                                //return (null, new ErrorDetailDTO
-                                //{
-                                //    Status = (int)System.Net.HttpStatusCode.NotFound,
-                                //    Title = zamupayPaymentOrderNotFound.Message,
-                                //    TraceId = zamupayPaymentOrderNotFound.Id
-                                //});
-
-                                return (null, output.FromJson<PaymentOrderNotFoundDTO>());
-
-                            //break;
-                            case System.Net.HttpStatusCode.NotImplemented:
-                                break;
-                            case System.Net.HttpStatusCode.NotModified:
-                                break;
-                            case System.Net.HttpStatusCode.OK:
-
-                                return (output.FromJson<BillPaymentResultDTO>(), null);
-
-                            //break;
-                            case System.Net.HttpStatusCode.PartialContent:
-                                break;
-                            case System.Net.HttpStatusCode.PaymentRequired:
-                                break;
-                            case System.Net.HttpStatusCode.PermanentRedirect:
-                                break;
-                            case System.Net.HttpStatusCode.PreconditionFailed:
-                                break;
-                            case System.Net.HttpStatusCode.PreconditionRequired:
-                                break;
-                            case System.Net.HttpStatusCode.Processing:
-                                break;
-                            case System.Net.HttpStatusCode.ProxyAuthenticationRequired:
-                                break;
-                            //case System.Net.HttpStatusCode.Redirect:
-                            //    break;
-                            case System.Net.HttpStatusCode.RedirectKeepVerb:
-                                break;
-                            case System.Net.HttpStatusCode.RedirectMethod:
-                                break;
-                            case System.Net.HttpStatusCode.RequestedRangeNotSatisfiable:
-                                break;
-                            case System.Net.HttpStatusCode.RequestEntityTooLarge:
-                                break;
-                            case System.Net.HttpStatusCode.RequestHeaderFieldsTooLarge:
-                                break;
-                            case System.Net.HttpStatusCode.RequestTimeout:
-                                break;
-                            case System.Net.HttpStatusCode.RequestUriTooLong:
-                                break;
-                            case System.Net.HttpStatusCode.ResetContent:
-                                break;
-                            //case System.Net.HttpStatusCode.SeeOther:
-                            //    break;
-                            case System.Net.HttpStatusCode.ServiceUnavailable:
-                                break;
-                            case System.Net.HttpStatusCode.SwitchingProtocols:
-                                break;
-                            //case System.Net.HttpStatusCode.TemporaryRedirect:
-                            //    break;
-                            case System.Net.HttpStatusCode.TooManyRequests:
-                                break;
-                            case System.Net.HttpStatusCode.Unauthorized:
-
-                                //var zamupayPaymentOrderNotFound = output.FromJson<PaymentOrderNotFoundDTO>();
-
-                                //return (null, new ErrorDetailDTO
-                                //{
-                                //    Status = (int)System.Net.HttpStatusCode.NotFound,
-                                //    Title = zamupayPaymentOrderNotFound.Message,
-                                //    TraceId = zamupayPaymentOrderNotFound.Id
-                                //});
-
-                                return (null, output.FromJson<PaymentOrderNotFoundDTO>());
-
-                            //break;
-                            case System.Net.HttpStatusCode.UnavailableForLegalReasons:
-                                break;
-                            case System.Net.HttpStatusCode.UnprocessableEntity:
-                                break;
-                            case System.Net.HttpStatusCode.UnsupportedMediaType:
-                                break;
-                            case System.Net.HttpStatusCode.Unused:
-                                break;
-                            case System.Net.HttpStatusCode.UpgradeRequired:
-                                break;
-                            case System.Net.HttpStatusCode.UseProxy:
-                                break;
-                            case System.Net.HttpStatusCode.VariantAlsoNegotiates:
-                                break;
-                            default:
-                                break;
-                        }
-                    }
+                    return (zamupayRouteCollection, null);
                 }
-
-                if (!string.IsNullOrWhiteSpace(output))
+                else
                 {
-                    var error = output.FromJson<ErrorDetailDTO>();
+                    if (!string.IsNullOrWhiteSpace(output))
+                    {
+                        var error = output.FromJson<ErrorDetailDTO>();
 
-                    return (null, error);
+                        return (null, error);
+                    }
+
+                    return (null, new ErrorDetailDTO { Title = $"Reason phrase: {response.ReasonPhrase}", Status = (int)response.StatusCode });
                 }
             }
             catch (Exception ex)
             {
                 return (null, new ErrorDetailDTO { Status = -1, Title = $"{requestUrl}>ErrorMessage {ex.Message}" });
             }
-
-            return (null, null);
         }
 
         #endregion
