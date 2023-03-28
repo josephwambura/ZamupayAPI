@@ -142,7 +142,7 @@ static async Task TestZamupayAPIAsync(IServiceProvider services)
                 {
                     var transactionQueryModelDTO = new TransactionQueryModelDTO
                     {
-                        Id = createBillPaymentResult.Item1.Message?.OriginatorConversationId,
+                        Id = createBillPaymentResult.Item1?.Message?.OriginatorConversationId,
                         IdType = PaymentIdTypeEnum.OriginatorConversationId
                     };
 
@@ -156,7 +156,7 @@ static async Task TestZamupayAPIAsync(IServiceProvider services)
                     {
                         if (billPaymentQueryResult.Item1 != null)
                         {
-                            Console.WriteLine(billPaymentQueryResult.Item1.SystemConversationId);
+                            Console.WriteLine(billPaymentQueryResult.Item1?.SystemConversationId);
                         }
                     }
 
