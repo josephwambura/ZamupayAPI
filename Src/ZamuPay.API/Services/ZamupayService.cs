@@ -15,16 +15,15 @@ namespace ZamuPay.API.Services
 {
     public class ZamupayService : IZamupayService
     {
+        private readonly IHttpClientFactory _httpClientFactory = null!;
         private readonly IDistributedCache _distributedCache;
         private readonly IOptions<BaseUrlConfiguration> _baseUrlConfiguration;
 
         public ZamupayService(
+            IHttpClientFactory httpClientFactory,
             IDistributedCache distributedCache,
             IOptions<BaseUrlConfiguration> baseUrlConfiguration)
-        {
-            _distributedCache = distributedCache;
-            _baseUrlConfiguration = baseUrlConfiguration;
-        }
+            => (_httpClientFactory, _distributedCache, _baseUrlConfiguration) = (httpClientFactory, distributedCache, baseUrlConfiguration);
 
         #region Identity Server
 
@@ -63,7 +62,7 @@ namespace ZamuPay.API.Services
                 // Add some custom headers to the request without validation
                 request.Headers.TryAddWithoutValidation("Content-Type", "application/x-www-form-urlencoded");
 
-                HttpResponseMessage response = await HttpClientExtensions.SendHttpClientRequestAsync(_baseUrlConfiguration.Value.IdentityServerBase, request, cancellationToken);
+                HttpResponseMessage response = await HttpClientExtensions.SendHttpClientRequestAsync(_httpClientFactory, _baseUrlConfiguration.Value.IdentityServerBase, request, cancellationToken);
 
                 // Read the response content as a string
                 var output = await response.Content.ReadAsStringAsync();
@@ -128,7 +127,7 @@ namespace ZamuPay.API.Services
                 // Add some custom headers to the request without validation
                 request.Headers.TryAddWithoutValidation("Authorization", $"Bearer {auth.Item1?.AccessToken}");
 
-                HttpResponseMessage response = await HttpClientExtensions.SendHttpClientRequestAsync(_baseUrlConfiguration.Value.ApiBase, request, cancellationToken);
+                HttpResponseMessage response = await HttpClientExtensions.SendHttpClientRequestAsync(_httpClientFactory, _baseUrlConfiguration.Value.ApiBase, request, cancellationToken);
 
                 // Read the response content as a string
                 var output = await response.Content.ReadAsStringAsync();
@@ -222,7 +221,7 @@ namespace ZamuPay.API.Services
                 // Add some custom headers to the request without validation
                 request.Headers.TryAddWithoutValidation("Authorization", $"Bearer {auth.Item1?.AccessToken}");
 
-                HttpResponseMessage response = await HttpClientExtensions.SendHttpClientRequestAsync(_baseUrlConfiguration.Value.ApiBase, request, cancellationToken);
+                HttpResponseMessage response = await HttpClientExtensions.SendHttpClientRequestAsync(_httpClientFactory, _baseUrlConfiguration.Value.ApiBase, request, cancellationToken);
 
                 // Read the response content as a string
                 var output = await response.Content.ReadAsStringAsync();
@@ -278,7 +277,7 @@ namespace ZamuPay.API.Services
                 // Add some custom headers to the request without validation
                 request.Headers.TryAddWithoutValidation("Authorization", $"Bearer {auth.Item1?.AccessToken}");
 
-                HttpResponseMessage response = await HttpClientExtensions.SendHttpClientRequestAsync(_baseUrlConfiguration.Value.ApiBase, request, cancellationToken);
+                HttpResponseMessage response = await HttpClientExtensions.SendHttpClientRequestAsync(_httpClientFactory, _baseUrlConfiguration.Value.ApiBase, request, cancellationToken);
 
                 // Read the response content as a string
                 var output = await response.Content.ReadAsStringAsync();
@@ -336,7 +335,7 @@ namespace ZamuPay.API.Services
                 request.Headers.TryAddWithoutValidation("Authorization", $"Bearer {auth.Item1?.AccessToken}");
                 request.Headers.TryAddWithoutValidation("Accept", "text/plain");
 
-                HttpResponseMessage response = await HttpClientExtensions.SendHttpClientRequestAsync(_baseUrlConfiguration.Value.ApiBase, request, cancellationToken);
+                HttpResponseMessage response = await HttpClientExtensions.SendHttpClientRequestAsync(_httpClientFactory, _baseUrlConfiguration.Value.ApiBase, request, cancellationToken);
 
                 // Read the response content as a string
                 var output = await response.Content.ReadAsStringAsync();
@@ -383,7 +382,7 @@ namespace ZamuPay.API.Services
                 // Add some custom headers to the request without validation
                 request.Headers.TryAddWithoutValidation("Authorization", $"Bearer {auth.Item1?.AccessToken}");
 
-                HttpResponseMessage response = await HttpClientExtensions.SendHttpClientRequestAsync(_baseUrlConfiguration.Value.ApiBase, request, cancellationToken);
+                HttpResponseMessage response = await HttpClientExtensions.SendHttpClientRequestAsync(_httpClientFactory, _baseUrlConfiguration.Value.ApiBase, request, cancellationToken);
 
                 // Read the response content as a string
                 var output = await response.Content.ReadAsStringAsync();

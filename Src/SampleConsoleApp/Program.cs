@@ -17,6 +17,8 @@ using var host = Host.CreateDefaultBuilder(args)
     })
     .ConfigureServices((hostContext, services) =>
     {
+        services.AddHttpClient();
+
         // needed to load configuration from appsettings.json
         services.AddOptions();
 
