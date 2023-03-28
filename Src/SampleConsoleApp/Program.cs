@@ -1,15 +1,11 @@
-﻿// See https://aka.ms/new-console-template for more information
-
-using Microsoft.Extensions.Configuration;
+﻿using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
-
 using ZamuPay.API.DTOs;
 using ZamuPay.API.Extensions;
+using ZamuPay.API.Interfaces;
 using ZamuPay.API.Services;
 using ZamuPay.API.Utils;
-
-//var builder = Host.CreateDefaultBuilder(args);
 
 using var host = Host.CreateDefaultBuilder(args)
     .ConfigureHostConfiguration(configHost =>

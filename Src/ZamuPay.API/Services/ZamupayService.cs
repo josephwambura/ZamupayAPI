@@ -9,6 +9,7 @@ using System.Threading.Tasks;
 using System.Linq;
 using System.Collections.Generic;
 using System.Net.Http;
+using ZamuPay.API.Interfaces;
 
 namespace ZamuPay.API.Services
 {

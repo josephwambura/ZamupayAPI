@@ -5,7 +5,7 @@ using System.Threading.Tasks;
 
 using ZamuPay.API.DTOs;
 
-namespace ZamuPay.API.Services
+namespace ZamuPay.API.Interfaces
 {
     public interface IZamupayService
     {
