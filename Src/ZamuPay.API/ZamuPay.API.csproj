@@ -1,0 +1,44 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+	<PropertyGroup>
+		<TargetFramework>netstandard2.1</TargetFramework>
+		<PackageId>Zamupay.API</PackageId>
+		<Nullable>enable</Nullable>
+		<GeneratePackageOnBuild>True</GeneratePackageOnBuild>
+		<Version>1.0.0</Version>
+		<Authors>Joseph Wambura</Authors>
+		<Company>Pi COnsulting</Company>
+		<Title>Zamupay API</Title>
+		<PackageTags>Zamupay API;Zamupay;Fintech;Money Transfer API; Kenyan Bank integrations</PackageTags>
+		<Description>
+			This client library enables working with the Zamupay API service for fintech services globally.
+			For this release see notes - https://sandboxapi.zamupay.com/CHANGELOG.md
+			in addition to the breaking changes https://sandboxapi.zamupay.com/BreakingChanges.txt
+			Zamupay API quickstarts and tutorials - https://sandboxapi.zamupay.com/tutorials
+			Zamupay API REST API Reference - https://sandboxapi.zamupay.com/swagger/index.html
+			REST API Reference for FIntech Service - https://sandboxapi.zamupay.com/swagger/index.html
+		</Description>
+		<EnforceCodeStyleInBuild>True</EnforceCodeStyleInBuild>
+		<EnableNETAnalyzers>True</EnableNETAnalyzers>
+		<Copyright>2012 - 2022 Pi COnsulting</Copyright>
+	</PropertyGroup>
+
+	<PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|AnyCPU'">
+		<PackageId>Zamupay.API.Debug</PackageId>
+		<TreatWarningsAsErrors>False</TreatWarningsAsErrors>
+		<CheckForOverflowUnderflow>True</CheckForOverflowUnderflow>
+	</PropertyGroup>
+
+	<PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|AnyCPU'">
+		<TreatWarningsAsErrors>True</TreatWarningsAsErrors>
+		<CheckForOverflowUnderflow>True</CheckForOverflowUnderflow>
+	</PropertyGroup>
+
+	<ItemGroup>
+	  <PackageReference Include="Microsoft.Extensions.Caching.Abstractions" Version="8.0.0-preview.2.23128.3" />
+	  <PackageReference Include="Microsoft.Extensions.Options" Version="8.0.0-preview.2.23128.3" />
+	  <PackageReference Include="RestSharp" Version="109.0.2-alpha.0.2" />
+	  <PackageReference Include="System.Text.Json" Version="8.0.0-preview.2.23128.3" />
+	</ItemGroup>
+
+</Project>
