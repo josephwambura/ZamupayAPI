@@ -52,39 +52,39 @@ static async Task TestZamupayAPIAsync(IServiceProvider services)
 
     var auth = await _zamupayService.GetZamupayIdentityServerAuthTokenAsync();
 
-    if (!string.IsNullOrWhiteSpace(auth.Item1?.AccessToken))
+    if (!string.IsNullOrWhiteSpace(auth.Items?.AccessToken))
     {
-        token = auth.Item1.AccessToken;
-        expiresIn = auth.Item1.ExpiresIn;
+        token = auth.Items.AccessToken;
+        expiresIn = auth.Items.ExpiresIn;
         requestDateTime = DateTime.Now;
-        Console.WriteLine(auth.Item1.AccessToken);
+        Console.WriteLine(auth.Items.AccessToken);
     }
 
     var zamupayRoutes = await _zamupayService.GetZamupayRoutesAsync(10);
 
-    if (zamupayRoutes.Item2 != null)
+    if (!zamupayRoutes.Succeeded)
     {
-        Console.WriteLine(zamupayRoutes.Item2.ToString());
+        Console.WriteLine(zamupayRoutes!.Errors!.FirstOrDefault()!.Status);
     }
     else
     {
-        if (zamupayRoutes.Item1 != null)
+        if (zamupayRoutes.Succeeded)
         {
-            routes = zamupayRoutes.Item1.Routes.ToArray();
+            routes = zamupayRoutes.Items!.Routes.ToArray();
 
             Console.WriteLine(routes?.FirstOrDefault()?.RouteIntergration);
 
-            var zamupayRouteChannelTypes = await _zamupayService.GetZamupayRouteChannelTypesAsync(Guid.Parse(zamupayRoutes.Item1.Routes[0].Id), 10);
+            var zamupayRouteChannelTypes = await _zamupayService.GetZamupayRouteChannelTypesAsync(Guid.Parse(routes![0].Id), 10);
 
-            if (zamupayRouteChannelTypes.Item2 != null)
+            if (!zamupayRouteChannelTypes.Succeeded)
             {
-                Console.WriteLine(zamupayRouteChannelTypes.Item2.ToString());
+                Console.WriteLine(zamupayRouteChannelTypes!.Errors!.FirstOrDefault()!.Status);
             }
             else
             {
-                if (zamupayRouteChannelTypes.Item1 != null)
+                if (zamupayRouteChannelTypes.Succeeded)
                 {
-                    channelTypes = zamupayRouteChannelTypes.Item1.ToArray();
+                    channelTypes = zamupayRouteChannelTypes.Items?.ToArray();
 
                     Console.WriteLine(channelTypes?.FirstOrDefault()?.ChannelDescription);
                 }
@@ -92,19 +92,19 @@ static async Task TestZamupayAPIAsync(IServiceProvider services)
 
             var categories = new List<string>();
 
-            foreach (var item in zamupayRoutes.Item1.Routes)
+            foreach (var item in zamupayRoutes.Items!.Routes)
             {
                 var zamupayRoute = await _zamupayService.GetZamupayRouteAsync(Guid.Parse(item.Id), 10);
 
-                if (zamupayRoute.Item2 != null)
+                if (!zamupayRoute.Succeeded)
                 {
-                    Console.WriteLine(zamupayRoute.Item2.ToString());
+                    Console.WriteLine(zamupayRoute!.Errors!.FirstOrDefault()!.Status);
                 }
                 else
                 {
-                    if (zamupayRoute.Item1 != null)
+                    if (zamupayRoute.Succeeded)
                     {
-                        Console.WriteLine(zamupayRoute.Item1.CategoryDescription);
+                        Console.WriteLine(zamupayRoute.Items?.CategoryDescription);
                     }
                 }
 
@@ -115,15 +115,15 @@ static async Task TestZamupayAPIAsync(IServiceProvider services)
             {
                 var zamupayRouteByCategories = await _zamupayService.GetZamupayRoutesByCategoryAsync(categories[0], 10);
 
-                if (zamupayRouteByCategories.Item2 != null)
+                if (!zamupayRouteByCategories.Succeeded)
                 {
-                    Console.WriteLine(zamupayRouteByCategories.Item2.ToString());
+                    Console.WriteLine(zamupayRouteByCategories!.Errors!.FirstOrDefault()!.Status);
                 }
                 else
                 {
-                    if (zamupayRouteByCategories.Item1 != null)
+                    if (zamupayRouteByCategories.Succeeded)
                     {
-                        Console.WriteLine(zamupayRouteByCategories.Item1?.FirstOrDefault()?.RouteIntergration);
+                        Console.WriteLine(zamupayRouteByCategories.Items?.FirstOrDefault()?.RouteIntergration);
                     }
                 }
             }
@@ -134,35 +134,35 @@ static async Task TestZamupayAPIAsync(IServiceProvider services)
 
             var createBillPaymentResult = await _zamupayService.PostBillPaymentAsync(billPayment);
 
-            if (createBillPaymentResult.Item2 != null)
+            if (!createBillPaymentResult.Succeeded)
             {
-                Console.WriteLine(createBillPaymentResult.Item2.ToString());
+                Console.WriteLine(createBillPaymentResult.Errors!.FirstOrDefault()!.Status);
             }
             else
             {
-                if (createBillPaymentResult.Item1 != null)
+                if (createBillPaymentResult.Succeeded)
                 {
                     var transactionQueryModelDTO = new TransactionQueryModelDTO
                     {
-                        Id = createBillPaymentResult.Item1?.Message?.OriginatorConversationId,
+                        Id = createBillPaymentResult.Items!.Message!.OriginatorConversationId,
                         IdType = PaymentIdTypeEnum.OriginatorConversationId
                     };
 
                     var billPaymentQueryResult = await _zamupayService.GetBillPaymentAsync(transactionQueryModelDTO);
 
-                    if (billPaymentQueryResult.Item2 != null)
+                    if (!billPaymentQueryResult.Succeeded)
                     {
-                        Console.WriteLine(billPaymentQueryResult.Item2.ToString());
+                        Console.WriteLine(billPaymentQueryResult.Errors!.FirstOrDefault()!.Status);
                     }
                     else
                     {
-                        if (billPaymentQueryResult.Item1 != null)
+                        if (billPaymentQueryResult.Succeeded)
                         {
-                            Console.WriteLine(billPaymentQueryResult.Item1?.SystemConversationId);
+                            Console.WriteLine(billPaymentQueryResult.Items?.SystemConversationId);
                         }
                     }
 
-                    Console.WriteLine(createBillPaymentResult.Item1?.Message?.DueAmount);
+                    Console.WriteLine(createBillPaymentResult.Items?.Message?.DueAmount);
                 }
             }
         }

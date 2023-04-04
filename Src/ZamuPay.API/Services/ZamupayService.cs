@@ -27,8 +27,12 @@ namespace ZamuPay.API.Services
 
         #region Identity Server
 
-        public async Task<(ZamupayIdentityServerAuthTokenDTO?, ErrorDetailDTO)> GetZamupayIdentityServerAuthTokenAsync(CancellationToken cancellationToken = default!)
+        public async Task<ZamuApiResult<ZamupayIdentityServerAuthTokenDTO>> GetZamupayIdentityServerAuthTokenAsync(CancellationToken cancellationToken = default!)
         {
+            var result = new ZamuApiResult<ZamupayIdentityServerAuthTokenDTO>();
+
+            var errors = new List<ErrorDetailDTO>();
+
             var requestUrl = $"{_baseUrlConfiguration.Value.IdentityServerBase}connect/token";
 
             try
@@ -37,16 +41,16 @@ namespace ZamuPay.API.Services
 
                 if (redisPayload != null)
                 {
-                    return (Encoding.UTF8.GetString(redisPayload).FromJson<ZamupayIdentityServerAuthTokenDTO>(), null);
+                    return result.Success(Encoding.UTF8.GetString(redisPayload).FromJson<ZamupayIdentityServerAuthTokenDTO>());
                 }
 
                 // Create a dictionary of parameters
                 var parameters = new Dictionary<string, string>
                 {
-                    { "client_id", _baseUrlConfiguration.Value.ClientId },
-                    { "client_secret", _baseUrlConfiguration.Value.ClientSecret },
-                    { "grant_type", _baseUrlConfiguration.Value.GrantType },
-                    { "scope", _baseUrlConfiguration.Value.Scope }
+                    { "client_id", _baseUrlConfiguration.Value.ClientId! },
+                    { "client_secret", _baseUrlConfiguration.Value.ClientSecret! },
+                    { "grant_type", _baseUrlConfiguration.Value.GrantType! },
+                    { "scope", _baseUrlConfiguration.Value.Scope! }
                 };
 
                 // Create a content object with the parameters and the media type
@@ -79,7 +83,7 @@ namespace ZamuPay.API.Services
 
                     await _distributedCache.SetAsync("ZamupayIdentityServerAuthToken", Encoding.UTF8.GetBytes(output), options, cancellationToken);
 
-                    return (zamupayIdentityServerAuthToken, null);
+                    return result.Success(zamupayIdentityServerAuthToken);
                 }
                 else
                 {
@@ -87,15 +91,21 @@ namespace ZamuPay.API.Services
                     {
                         var error = output.FromJson<ErrorDetailDTO>();
 
-                        return (null, error);
+                        errors.Add(error);
+
+                        return result.Failed(errors);
                     }
 
-                    return (null, new ErrorDetailDTO { Title = $"Reason phrase: {response.ReasonPhrase}", Status = (int)response.StatusCode });
+                    errors.Add(new ErrorDetailDTO { Title = $"Reason phrase: {response.ReasonPhrase}", Status = (int)response.StatusCode });
+
+                    return result.Failed(errors);
                 }
             }
             catch (Exception ex)
             {
-                return (null, new ErrorDetailDTO { Status = -1, Title = $"{requestUrl}>ErrorMessage {ex.Message}" });
+                errors.Add(new ErrorDetailDTO { Status = -1, Title = $"{requestUrl}>ErrorMessage {ex.Message}" });
+
+                return result.Failed(errors);
             }
         }
 
@@ -103,12 +113,18 @@ namespace ZamuPay.API.Services
 
         #region Routes
 
-        public async Task<(ZamupayRoutesDTO?, ErrorDetailDTO)> GetZamupayRoutesAsync(int expirationTime, CancellationToken cancellationToken = default!)
+        public async Task<ZamuApiResult<ZamupayRoutesDTO>> GetZamupayRoutesAsync(int expirationTime, CancellationToken cancellationToken = default!)
         {
-            var auth = await this.GetZamupayIdentityServerAuthTokenAsync(cancellationToken);
+            var result = new ZamuApiResult<ZamupayRoutesDTO>();
 
-            if (auth.Item2 != null)
-                return (null, auth.Item2);
+            var errors = new List<ErrorDetailDTO>();
+
+            var auth = await GetZamupayIdentityServerAuthTokenAsync(cancellationToken);
+
+            if (!auth.Succeeded)
+            {
+                return result.Failed(auth.Errors);
+            }
 
             var requestUrl = $"{_baseUrlConfiguration.Value.ApiBase}v1/transaction-routes/assigned-routes";
 
@@ -118,19 +134,20 @@ namespace ZamuPay.API.Services
 
                 if (redisPayload != null)
                 {
-                    return (Encoding.UTF8.GetString(redisPayload).FromJson<ZamupayRoutesDTO>(), null);
+                    return result.Success(Encoding.UTF8.GetString(redisPayload).FromJson<ZamupayRoutesDTO>());
                 }
 
                 // Create a request message with the POST method and the Uri
                 var request = new HttpRequestMessage(HttpMethod.Get, "v1/transaction-routes/assigned-routes");
 
                 // Add some custom headers to the request without validation
-                request.Headers.TryAddWithoutValidation("Authorization", $"Bearer {auth.Item1?.AccessToken}");
+                request.Headers.TryAddWithoutValidation("Authorization", $"Bearer {auth.Items?.AccessToken}");
 
-                HttpResponseMessage response = await HttpClientExtensions.SendHttpClientRequestAsync(_httpClientFactory, _baseUrlConfiguration.Value.ApiBase, request, cancellationToken);
+                HttpResponseMessage response = await HttpClientExtensions.SendHttpClientRequestAsync(_httpClientFactory, _baseUrlConfiguration.Value.ApiBase!, request, cancellationToken);
 
                 // Read the response content as a string
                 var output = await response.Content.ReadAsStringAsync();
+
 
                 // Check if the response is successful
                 if (response.IsSuccessStatusCode)
@@ -144,72 +161,96 @@ namespace ZamuPay.API.Services
 
                     await _distributedCache.SetAsync("ZamupayRoutes", Encoding.UTF8.GetBytes(output), options, cancellationToken);
 
-                    return (zamupayRouteCollection, null);
+                    
+                    return result.Success(zamupayRouteCollection);
                 }
                 else
                 {
+
                     if (!string.IsNullOrWhiteSpace(output))
                     {
                         var error = output.FromJson<ErrorDetailDTO>();
 
-                        return (null, error);
+                        errors.Add(error);
+
+                        return result.Failed(errors);
                     }
 
-                    return (null, new ErrorDetailDTO { Title = $"Reason phrase: {response.ReasonPhrase}", Status = (int)response.StatusCode });
+                    errors.Add(new ErrorDetailDTO { Title = $"Reason phrase: {response.ReasonPhrase}", Status = (int)response.StatusCode });
+
+                    return result.Failed(errors);
                 }
             }
             catch (Exception ex)
             {
-                return (null, new ErrorDetailDTO { Status = -1, Title = $"{requestUrl}>ErrorMessage {ex.Message}" });
+                errors.Add(new ErrorDetailDTO { Status = -1, Title = $"{requestUrl}>ErrorMessage {ex.Message}" });
+
+                return result.Failed(errors);
             }
         }
 
-        public async Task<(RouteDTO?, ErrorDetailDTO)> GetZamupayRouteAsync(Guid id, int expirationTime, CancellationToken cancellationToken = default!)
+        public async Task<ZamuApiResult<RouteDTO>> GetZamupayRouteAsync(Guid id, int expirationTime, CancellationToken cancellationToken = default!)
         {
-            var zamupayRoutes = await this.GetZamupayRoutesAsync(expirationTime, cancellationToken);
+            var result = new ZamuApiResult<RouteDTO>();
 
-            if (zamupayRoutes.Item2 != null)
+            var zamupayRoutes = await GetZamupayRoutesAsync(expirationTime, cancellationToken);
+
+            if (!zamupayRoutes.Succeeded)
             {
-                return (null, zamupayRoutes.Item2);
+                return result.Failed(zamupayRoutes.Errors);
             }
 
-            return (zamupayRoutes.Item1?.Routes.ToList().FirstOrDefault(r => r.Id == id.ToString()), null);
+            var routes = zamupayRoutes.Items;
+
+            return result.Success(routes!.Routes?.FirstOrDefault(r => r.Id == id.ToString()));
         }
 
-        public async Task<(IEnumerable<RouteDTO>?, ErrorDetailDTO)> GetZamupayRoutesByCategoryAsync(string category, int expirationTime, CancellationToken cancellationToken = default!)
+        public async Task<ZamuApiResult<IEnumerable<RouteDTO>>> GetZamupayRoutesByCategoryAsync(string category, int expirationTime, CancellationToken cancellationToken = default!)
         {
-            var zamupayRoutes = await this.GetZamupayRoutesAsync(expirationTime, cancellationToken);
+            var result = new ZamuApiResult<IEnumerable<RouteDTO>>();
 
-            if (zamupayRoutes.Item2 != null)
+            var zamupayRoutes = await GetZamupayRoutesAsync(expirationTime, cancellationToken);
+
+            if (!zamupayRoutes.Succeeded)
             {
-                return (null, zamupayRoutes.Item2);
+                return result.Failed(zamupayRoutes.Errors);
             }
 
-            return (zamupayRoutes.Item1?.Routes.ToList().Where(r => r.Category == category).ToList(), null);
+            var routes = zamupayRoutes.Items;
+
+            return result.Success(routes!.Routes.Where(route => route.Category == category));
         }
 
-        public async Task<(IEnumerable<ChannelTypeDTO>?, ErrorDetailDTO)> GetZamupayRouteChannelTypesAsync(Guid id, int expirationTime, CancellationToken cancellationToken = default!)
+        public async Task<ZamuApiResult<IEnumerable<ChannelTypeDTO>>> GetZamupayRouteChannelTypesAsync(Guid id, int expirationTime, CancellationToken cancellationToken = default!)
         {
-            var zamupayRoute = await this.GetZamupayRouteAsync(id, expirationTime, cancellationToken);
+            var result = new ZamuApiResult<IEnumerable<ChannelTypeDTO>>();
 
-            if (zamupayRoute.Item2 != null)
+            var zamupayRoute = await GetZamupayRouteAsync(id, expirationTime, cancellationToken);
+
+            if (!zamupayRoute.Succeeded)
             {
-                return (null, zamupayRoute.Item2);
+                return result.Failed(zamupayRoute.Errors);
             }
 
-            return (zamupayRoute.Item1?.ChannelTypes, null);
+            return result.Success(zamupayRoute.Items!.ChannelTypes);
         }
 
         #endregion
 
         #region Payment Orders
 
-        public async Task<(PaymentOrderDTO?, object)> GetPaymentOrderAsync(TransactionQueryModelDTO paymentQueryModel, CancellationToken cancellationToken = default!)
+        public async Task<ZamuApiResult<PaymentOrderDTO>> GetPaymentOrderAsync(TransactionQueryModelDTO paymentQueryModel, CancellationToken cancellationToken = default!)
         {
-            var auth = await this.GetZamupayIdentityServerAuthTokenAsync(cancellationToken);
+            var result = new ZamuApiResult<PaymentOrderDTO>();
 
-            if (auth.Item2 != null)
-                return (null, auth.Item2);
+            var errors = new List<ErrorDetailDTO>();
+
+            var auth = await GetZamupayIdentityServerAuthTokenAsync(cancellationToken);
+
+            if (!auth.Succeeded)
+            {
+                return result.Failed(auth.Errors);
+            }
 
             var requestUrl = $"{_baseUrlConfiguration.Value.ApiBase}v1/payment-order/check-status?Id={paymentQueryModel.Id}&IdType={paymentQueryModel.IdType}";
 
@@ -219,9 +260,9 @@ namespace ZamuPay.API.Services
                 var request = new HttpRequestMessage(HttpMethod.Get, $"v1/payment-order/check-status?Id={paymentQueryModel.Id}&IdType={paymentQueryModel.IdType}");
 
                 // Add some custom headers to the request without validation
-                request.Headers.TryAddWithoutValidation("Authorization", $"Bearer {auth.Item1?.AccessToken}");
+                request.Headers.TryAddWithoutValidation("Authorization", $"Bearer {auth.Items?.AccessToken}");
 
-                HttpResponseMessage response = await HttpClientExtensions.SendHttpClientRequestAsync(_httpClientFactory, _baseUrlConfiguration.Value.ApiBase, request, cancellationToken);
+                HttpResponseMessage response = await HttpClientExtensions.SendHttpClientRequestAsync(_httpClientFactory, _baseUrlConfiguration.Value.ApiBase!, request, cancellationToken);
 
                 // Read the response content as a string
                 var output = await response.Content.ReadAsStringAsync();
@@ -231,7 +272,7 @@ namespace ZamuPay.API.Services
                 {
                     var zamupayRouteCollection = output.FromJson<PaymentOrderDTO>();
 
-                    return (zamupayRouteCollection, null);
+                    return result.Success(zamupayRouteCollection);
                 }
                 else
                 {
@@ -239,15 +280,21 @@ namespace ZamuPay.API.Services
                     {
                         var error = output.FromJson<ErrorDetailDTO>();
 
-                        return (null, error);
+                        errors.Add(error);
+
+                        return result.Failed(errors);
                     }
 
-                    return (null, new ErrorDetailDTO { Title = $"Reason phrase: {response.ReasonPhrase}", Status = (int)response.StatusCode });
+                    errors.Add(new ErrorDetailDTO { Title = $"Reason phrase: {response.ReasonPhrase}", Status = (int)response.StatusCode });
+
+                    return result.Failed(errors);
                 }
             }
             catch (Exception ex)
             {
-                return (null, new ErrorDetailDTO { Status = -1, Title = $"{requestUrl}>ErrorMessage {ex.Message}" });
+                errors.Add(new ErrorDetailDTO { Status = -1, Title = $"{requestUrl}>ErrorMessage {ex.Message}" });
+
+                return result.Failed(errors);
             }
         }
 
@@ -255,17 +302,21 @@ namespace ZamuPay.API.Services
 
         #region Airtime Purchases
 
-        public Task<(AirtimePurchaseRequestDTO?, object)> PostAirtimePurchaseRequestAsync(AirtimePurchaseRequestDTO paymentQueryModel, CancellationToken cancellationToken = default!)
+        public Task<ZamuApiResult<AirtimePurchaseRequestDTO>> PostAirtimePurchaseRequestAsync(AirtimePurchaseRequestDTO paymentQueryModel, CancellationToken cancellationToken = default!)
         {
             throw new NotImplementedException();
         }
 
-        public async Task<(PaymentOrderDTO?, object)> GetAirtimePurchaseAsync(TransactionQueryModelDTO paymentQueryModel, CancellationToken cancellationToken = default!)
+        public async Task<ZamuApiResult<PaymentOrderDTO>> GetAirtimePurchaseAsync(TransactionQueryModelDTO paymentQueryModel, CancellationToken cancellationToken = default!)
         {
-            var auth = await this.GetZamupayIdentityServerAuthTokenAsync(cancellationToken);
+            var result = new ZamuApiResult<PaymentOrderDTO>();
 
-            if (auth.Item2 != null)
-                return (null, auth.Item2);
+            var errors = new List<ErrorDetailDTO>();
+
+            var auth = await GetZamupayIdentityServerAuthTokenAsync(cancellationToken);
+
+            if (!auth.Succeeded)
+                return result.Failed(auth.Errors);
 
             var requestUrl = $"{_baseUrlConfiguration.Value.ApiBase}v1/payment-order/check-status?Id={paymentQueryModel.Id}&IdType={paymentQueryModel.IdType}";
 
@@ -275,9 +326,9 @@ namespace ZamuPay.API.Services
                 var request = new HttpRequestMessage(HttpMethod.Get, $"v1/payment-order/check-status?Id={paymentQueryModel.Id}&IdType={paymentQueryModel.IdType}");
 
                 // Add some custom headers to the request without validation
-                request.Headers.TryAddWithoutValidation("Authorization", $"Bearer {auth.Item1?.AccessToken}");
+                request.Headers.TryAddWithoutValidation("Authorization", $"Bearer {auth.Items?.AccessToken}");
 
-                HttpResponseMessage response = await HttpClientExtensions.SendHttpClientRequestAsync(_httpClientFactory, _baseUrlConfiguration.Value.ApiBase, request, cancellationToken);
+                HttpResponseMessage response = await HttpClientExtensions.SendHttpClientRequestAsync(_httpClientFactory, _baseUrlConfiguration.Value.ApiBase!, request, cancellationToken);
 
                 // Read the response content as a string
                 var output = await response.Content.ReadAsStringAsync();
@@ -287,7 +338,7 @@ namespace ZamuPay.API.Services
                 {
                     var zamupayRouteCollection = output.FromJson<PaymentOrderDTO>();
 
-                    return (zamupayRouteCollection, null);
+                    return result.Success(zamupayRouteCollection);
                 }
                 else
                 {
@@ -295,15 +346,21 @@ namespace ZamuPay.API.Services
                     {
                         var error = output.FromJson<ErrorDetailDTO>();
 
-                        return (null, error);
+                        errors.Add(error);
+
+                        return result.Failed(errors);
                     }
 
-                    return (null, new ErrorDetailDTO { Title = $"Reason phrase: {response.ReasonPhrase}", Status = (int)response.StatusCode });
+                    errors.Add(new ErrorDetailDTO { Title = $"Reason phrase: {response.ReasonPhrase}", Status = (int)response.StatusCode });
+
+                    return result.Failed(errors);
                 }
             }
             catch (Exception ex)
             {
-                return (null, new ErrorDetailDTO { Status = -1, Title = $"{requestUrl}>ErrorMessage {ex.Message}" });
+                errors.Add(new ErrorDetailDTO { Status = -1, Title = $"{requestUrl}>ErrorMessage {ex.Message}" });
+
+                return result.Failed(errors);
             }
         }
 
@@ -311,12 +368,16 @@ namespace ZamuPay.API.Services
 
         #region Bill Payments
 
-        public async Task<(BillPaymentSuccessResponseDTO?, object)> PostBillPaymentAsync(BillPaymentDTO billPaymentDTO, CancellationToken cancellationToken = default!)
+        public async Task<ZamuApiResult<BillPaymentSuccessResponseDTO>> PostBillPaymentAsync(BillPaymentDTO billPaymentDTO, CancellationToken cancellationToken = default!)
         {
-            var auth = await this.GetZamupayIdentityServerAuthTokenAsync(cancellationToken);
+            var result = new ZamuApiResult<BillPaymentSuccessResponseDTO>();
 
-            if (auth.Item2 != null)
-                return (null, auth.Item2);
+            var errors = new List<ErrorDetailDTO>();
+
+            var auth = await GetZamupayIdentityServerAuthTokenAsync(cancellationToken);
+
+            if (!auth.Succeeded)
+                return result.Failed(auth.Errors);
 
             var requestUrl = $"{_baseUrlConfiguration.Value.ApiBase}v1/bill-payments";
 
@@ -332,10 +393,10 @@ namespace ZamuPay.API.Services
 
                 // Add some custom headers to the request without validation
                 request.Headers.TryAddWithoutValidation("Content-Type", "application/json");
-                request.Headers.TryAddWithoutValidation("Authorization", $"Bearer {auth.Item1?.AccessToken}");
+                request.Headers.TryAddWithoutValidation("Authorization", $"Bearer {auth.Items?.AccessToken}");
                 request.Headers.TryAddWithoutValidation("Accept", "text/plain");
 
-                HttpResponseMessage response = await HttpClientExtensions.SendHttpClientRequestAsync(_httpClientFactory, _baseUrlConfiguration.Value.ApiBase, request, cancellationToken);
+                HttpResponseMessage response = await HttpClientExtensions.SendHttpClientRequestAsync(_httpClientFactory, _baseUrlConfiguration.Value.ApiBase!, request, cancellationToken);
 
                 // Read the response content as a string
                 var output = await response.Content.ReadAsStringAsync();
@@ -345,7 +406,7 @@ namespace ZamuPay.API.Services
                 {
                     var zamupayRouteCollection = output.FromJson<BillPaymentSuccessResponseDTO>();
 
-                    return (zamupayRouteCollection, null);
+                    return result.Success(zamupayRouteCollection);
                 }
                 else
                 {
@@ -353,24 +414,34 @@ namespace ZamuPay.API.Services
                     {
                         var error = output.FromJson<ErrorDetailDTO>();
 
-                        return (null, error);
+                        errors.Add(error);
+
+                        return result.Failed(errors);
                     }
 
-                    return (null, new ErrorDetailDTO { Title = $"Reason phrase: {response.ReasonPhrase}", Status = (int)response.StatusCode });
+                    errors.Add(new ErrorDetailDTO { Title = $"Reason phrase: {response.ReasonPhrase}", Status = (int)response.StatusCode });
+
+                    return result.Failed(errors);
                 }
             }
             catch (Exception ex)
             {
-                return (null, new ErrorDetailDTO { Status = -1, Title = $"{requestUrl}>ErrorMessage {ex.Message}" });
+                errors.Add(new ErrorDetailDTO { Status = -1, Title = $"{requestUrl}>ErrorMessage {ex.Message}" });
+
+                return result.Failed(errors);
             }
         }
 
-        public async Task<(BillPaymentResultDTO?, object)> GetBillPaymentAsync(TransactionQueryModelDTO paymentQueryModel, CancellationToken cancellationToken = default!)
+        public async Task<ZamuApiResult<BillPaymentResultDTO>> GetBillPaymentAsync(TransactionQueryModelDTO paymentQueryModel, CancellationToken cancellationToken = default!)
         {
+            var result = new ZamuApiResult<BillPaymentResultDTO>();
+
+            var errors = new List<ErrorDetailDTO>();
+
             var auth = await this.GetZamupayIdentityServerAuthTokenAsync(cancellationToken);
 
-            if (auth.Item2 != null)
-                return (null, auth.Item2);
+            if (!auth.Succeeded)
+                return result.Failed(auth.Errors);
 
             var requestUrl = $"{_baseUrlConfiguration.Value.ApiBase}v1/bill-payments?{paymentQueryModel.IdType}={paymentQueryModel.Id}";
 
@@ -380,9 +451,9 @@ namespace ZamuPay.API.Services
                 var request = new HttpRequestMessage(HttpMethod.Get, $"v1/bill-payments?{paymentQueryModel.IdType}={paymentQueryModel.Id}");
 
                 // Add some custom headers to the request without validation
-                request.Headers.TryAddWithoutValidation("Authorization", $"Bearer {auth.Item1?.AccessToken}");
+                request.Headers.TryAddWithoutValidation("Authorization", $"Bearer {auth.Items?.AccessToken}");
 
-                HttpResponseMessage response = await HttpClientExtensions.SendHttpClientRequestAsync(_httpClientFactory, _baseUrlConfiguration.Value.ApiBase, request, cancellationToken);
+                HttpResponseMessage response = await HttpClientExtensions.SendHttpClientRequestAsync(_httpClientFactory, _baseUrlConfiguration.Value.ApiBase!, request, cancellationToken);
 
                 // Read the response content as a string
                 var output = await response.Content.ReadAsStringAsync();
@@ -392,7 +463,7 @@ namespace ZamuPay.API.Services
                 {
                     var zamupayRouteCollection = output.FromJson<BillPaymentResultDTO>();
 
-                    return (zamupayRouteCollection, null);
+                    return result.Success(zamupayRouteCollection);
                 }
                 else
                 {
@@ -400,15 +471,21 @@ namespace ZamuPay.API.Services
                     {
                         var error = output.FromJson<ErrorDetailDTO>();
 
-                        return (null, error);
+                        errors.Add(error);
+
+                        return result.Failed(errors);
                     }
 
-                    return (null, new ErrorDetailDTO { Title = $"Reason phrase: {response.ReasonPhrase}", Status = (int)response.StatusCode });
+                    errors.Add(new ErrorDetailDTO { Title = $"Reason phrase: {response.ReasonPhrase}", Status = (int)response.StatusCode });
+
+                    return result.Failed(errors);
                 }
             }
             catch (Exception ex)
             {
-                return (null, new ErrorDetailDTO { Status = -1, Title = $"{requestUrl}>ErrorMessage {ex.Message}" });
+                errors.Add(new ErrorDetailDTO { Status = -1, Title = $"{requestUrl}>ErrorMessage {ex.Message}" });
+
+                return result.Failed(errors);
             }
         }
 
